@@ -26,6 +26,9 @@
 
     <actions>
         <!-- Add your actions here -->
+        <action id="com.amazingchs.action.retrace" class="RetraceAction" text="Retrace Stack..." description="崩溃堆栈解析">
+            <add-to-group group-id="HelpMenu" anchor="last"/>
+        </action>
     </actions>
 
 </idea-plugin>
