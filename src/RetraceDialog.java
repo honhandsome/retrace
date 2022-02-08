@@ -1,6 +1,7 @@
 import com.intellij.ide.plugins.IdeaPluginDescriptor;
 import com.intellij.ide.plugins.PluginManager;
 import com.intellij.ide.util.PropertiesComponent;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
@@ -10,6 +11,8 @@ import com.intellij.openapi.vfs.VirtualFile;
 
 import javax.annotation.Nullable;
 import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.*;
 import java.awt.event.*;
 import java.io.File;
@@ -25,6 +28,8 @@ public class RetraceDialog extends JDialog {
     private JComboBox<String> comboMappingBox;
     private JButton buttonMappingConfig;
     private JTextArea textArea;
+    private JButton dumpCrashButton;
+    private Thread worker;
 
     public RetraceDialog(@Nullable Project project) {
         this.project = project;
@@ -36,6 +41,13 @@ public class RetraceDialog extends JDialog {
         buttonMappingConfig.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 onAddMapping();
+            }
+        });
+
+        dumpCrashButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                onDumpCrash();
             }
         });
 
@@ -70,6 +82,23 @@ public class RetraceDialog extends JDialog {
         textArea.setLineWrap(true);
         // textArea 换行不断字
         textArea.setWrapStyleWord(true);
+        textArea.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                if (e.getLength() == 0) return;
+                dumpCrashButton.setVisible(false);
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                if (e.getLength() > 0) return;
+                dumpCrashButton.setVisible(true);
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+            }
+        });
 
         if (project == null) return;
         //获取 project 级别的 PropertiesComponent，指定相应的 project
@@ -95,40 +124,86 @@ public class RetraceDialog extends JDialog {
         }
     }
 
+    private void onDumpCrash() {
+        new Thread(() -> {
+            try {
+                String result = dumpCrash();
+                if (result.contains("waiting for device")) {
+                    ApplicationManager.getApplication().invokeLater(() -> {
+                        Messages.showMessageDialog(result, "ERROR", Messages.getInformationIcon());
+                    });
+                    return;
+                }
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    textArea.setText(result);
+                });
+            } catch (Exception e) {
+                e.printStackTrace();
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    Messages.showMessageDialog(e.getMessage(), "ERROR", Messages.getInformationIcon());
+                });
+            }
+        }).start();
+    }
+
+    private String dumpCrash() throws Exception {
+        String result = TerminalHelper.execCmd("adb logcat --buffer=crash", 1000);
+        System.out.println(result);
+        return result;
+    }
+
     private void onOK() {
         if (comboMappingBox.getSelectedItem() == null) {
-            Messages.showMessageDialog("Please choose Mapping first!", "ERROR", Messages.getInformationIcon());
+            Messages.showMessageDialog("Please choose Mapping first !", "ERROR", Messages.getInformationIcon());
             return;
         }
         if (textArea.getText() == null || textArea.getText().length() == 0) {
-            Messages.showMessageDialog("Please add crash stack first!", "ERROR", Messages.getInformationIcon());
+            Messages.showMessageDialog("Please add crash stack first !", "ERROR", Messages.getInformationIcon());
             return;
         }
-        // 创建崩溃堆栈临时文件
-        File crash = createTempFile(textArea.getText());
-        if (crash != null) {
+        new Thread(() -> {
             try {
-                //通过自己插件的id获取pluginId
-                PluginId pluginId = PluginId.getId("com.amazingchs.plugin.id");
-                IdeaPluginDescriptor plugin = PluginManager.getPlugin(pluginId);
-                if (plugin != null) {
-                    String path = plugin.getPath().getAbsolutePath();
-                    System.out.println(path);
-                    // retrace
-                    String cmd = "java -cp lib/r8.jar com.android.tools.r8.retrace.Retrace " + comboMappingBox.getSelectedItem() + " " + crash.getAbsolutePath();
-                    String result = TerminalHelper.execCmd(cmd, plugin.getPath());
-                    System.out.println(result);
+                String result = retraceImpl();
+                if (result.contains("Retrace Failed")) {
+                    ApplicationManager.getApplication().invokeLater(() -> {
+                        Messages.showMessageDialog(result, "ERROR", Messages.getInformationIcon());
+                    });
+                    return;
+                }
+                ApplicationManager.getApplication().invokeLater(() -> {
                     textArea.setText(result);
                     textArea.setEditable(false);
                     buttonOK.setVisible(false);
                     comboMappingBox.setVisible(false);
                     buttonMappingConfig.setVisible(false);
-                }
+                });
             } catch (Exception e) {
                 e.printStackTrace();
-                Messages.showMessageDialog(e.getMessage(), "ERROR", Messages.getInformationIcon());
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    Messages.showMessageDialog(e.getMessage(), "ERROR", Messages.getInformationIcon());
+                });
+            }
+        }).start();
+    }
+
+    private String retraceImpl() throws Exception {
+        // 创建崩溃堆栈临时文件
+        File crash = createTempFile(textArea.getText());
+        if (crash != null) {
+            //通过自己插件的id获取pluginId
+            PluginId pluginId = PluginId.getId("com.amazingchs.plugin.id");
+            IdeaPluginDescriptor plugin = PluginManager.getPlugin(pluginId);
+            if (plugin != null) {
+                String path = plugin.getPath().getAbsolutePath();
+                System.out.println(path);
+                // retrace
+                String cmd = "java -cp lib/r8.jar com.android.tools.r8.retrace.Retrace " + comboMappingBox.getSelectedItem() + " " + crash.getAbsolutePath();
+                String result = TerminalHelper.execCmd(cmd, plugin.getPath());
+                System.out.println(result);
+                return result;
             }
         }
+        return "Retrace Failed !";
     }
 
     private void onCancel() {
