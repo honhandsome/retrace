@@ -134,6 +134,12 @@ public class RetraceDialog extends JDialog {
                     });
                     return;
                 }
+                if (result.contains("Dump Failed")) {
+                    ApplicationManager.getApplication().invokeLater(() -> {
+                        Messages.showMessageDialog(result, "ERROR", Messages.getInformationIcon());
+                    });
+                    return;
+                }
                 ApplicationManager.getApplication().invokeLater(() -> {
                     textArea.setText(result);
                 });
@@ -147,7 +153,11 @@ public class RetraceDialog extends JDialog {
     }
 
     private String dumpCrash() throws Exception {
-        String result = TerminalHelper.execCmd("adb logcat --buffer=crash", 1000);
+        String source = TerminalHelper.execCmd("adb logcat -v raw -s AndroidRuntime --buffer=crash", 1000);
+        if (source.contains("waiting for device")) return source;
+        if (!source.contains("Process: com.tyjh.lightchain")) return "Dump Failed !";
+        String[] crashStacks = source.split("(?=Process: com.tyjh.lightchain)");
+        String result = crashStacks[crashStacks.length - 1];
         System.out.println(result);
         return result;
     }
