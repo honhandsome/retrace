@@ -153,13 +153,23 @@ public class RetraceDialog extends JDialog {
     }
 
     private String dumpCrash() throws Exception {
-        String source = TerminalHelper.execCmd("adb logcat -v raw -s AndroidRuntime --buffer=crash", 1000);
-        if (source.contains("waiting for device")) return source;
-        if (!source.contains("Process: com.tyjh.lightchain")) return "Dump Failed !";
-        String[] crashStacks = source.split("(?=Process: com.tyjh.lightchain)");
-        String result = crashStacks[crashStacks.length - 1];
-        System.out.println(result);
-        return result;
+        //通过自己插件的id获取pluginId
+        PluginId pluginId = PluginId.getId("com.amazingchs.plugin.id");
+        IdeaPluginDescriptor plugin = PluginManager.getPlugin(pluginId);
+        if (plugin != null) {
+            String path = plugin.getPath().getAbsolutePath();
+            path = path.substring(0, path.indexOf("Library"));
+            path = path + "Library/Android/sdk/platform-tools/";
+            System.out.println(path);
+            String source = TerminalHelper.execCmd("./adb logcat -v raw -s AndroidRuntime --buffer=crash", new File(path), 1000);
+            if (source.contains("waiting for device")) return source;
+            if (!source.contains("Process: com.tyjh.lightchain")) return "Dump Failed !";
+            String[] crashStacks = source.split("(?=Process: com.tyjh.lightchain)");
+            String result = crashStacks[crashStacks.length - 1];
+            System.out.println(result);
+            return result;
+        }
+        return "Dump Failed !";
     }
 
     private void onOK() {
