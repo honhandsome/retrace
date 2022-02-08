@@ -1,6 +1,10 @@
+import com.intellij.ide.plugins.IdeaPluginDescriptor;
+import com.intellij.ide.plugins.PluginManager;
+import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.vfs.VirtualFile;
 
 import javax.annotation.Nullable;
@@ -8,15 +12,16 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
 
 public class RetraceDialog extends JDialog {
     private final Project project;
     private JPanel contentPane;
     private JButton buttonOK;
     private JButton buttonCancel;
-    private JComboBox<String> comboRetraceBox;
     private JComboBox<String> comboMappingBox;
-    private JButton buttonRetraceConfig;
     private JButton buttonMappingConfig;
     private JTextArea textArea;
 
@@ -26,12 +31,6 @@ public class RetraceDialog extends JDialog {
         setMinimumSize(new Dimension(800, 600));
         setModal(true);
         getRootPane().setDefaultButton(buttonOK);
-
-        buttonRetraceConfig.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent e) {
-                onConfig();
-            }
-        });
 
         buttonMappingConfig.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
@@ -72,32 +71,61 @@ public class RetraceDialog extends JDialog {
         textArea.setWrapStyleWord(true);
     }
 
-    private void onConfig() {
-        FileChooserDescriptor chooserDescriptor = new FileChooserDescriptor(true,
-                true, true, true, true, true);
-        VirtualFile virtualFile = FileChooser.chooseFile(chooserDescriptor, project, null);
-        if (virtualFile != null) {
-            comboRetraceBox.addItem(virtualFile.getPath());
-        }
-    }
-
     private void onAddMapping() {
         FileChooserDescriptor chooserDescriptor = new FileChooserDescriptor(true,
-                true, true, true, true, true);
+                false, false, false, false, false);
         VirtualFile virtualFile = FileChooser.chooseFile(chooserDescriptor, project, null);
         if (virtualFile != null) {
-            comboMappingBox.addItem(virtualFile.getPath());
+            comboMappingBox.insertItemAt(virtualFile.getPath(), 0);
         }
     }
 
     private void onOK() {
-        // retrace
-        textArea.setText("result");
-        textArea.setEditable(false);
+        // 创建崩溃堆栈临时文件
+        File crash = createTempFile(textArea.getText());
+        if (crash != null) {
+            try {
+                //通过自己插件的id获取pluginId
+                PluginId pluginId = PluginId.getId("com.amazingchs.plugin.id");
+                IdeaPluginDescriptor plugin = PluginManager.getPlugin(pluginId);
+                if (plugin != null) {
+                    String path = plugin.getPath().getAbsolutePath();
+                    System.out.println(path);
+                    // retrace
+                    String cmd = "java -cp lib/r8.jar com.android.tools.r8.retrace.Retrace " + project.getBasePath() + "/mapping.txt " + crash.getAbsolutePath();
+                    String result = TerminalHelper.execCmd(cmd, plugin.getPath());
+                    System.out.println(result);
+                    textArea.setText(result);
+                    textArea.setEditable(false);
+                    buttonOK.setVisible(false);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+                Messages.showMessageDialog(e.getMessage(), "ERROR", Messages.getInformationIcon());
+            }
+        }
     }
 
     private void onCancel() {
         dispose();
+    }
+
+    private File createTempFile(String content) {
+        File tempFile = null;
+        try {
+            // 在默认临时文件路径下创建临时文件"lightchain_crash_xxx..."
+            tempFile = File.createTempFile("lightchain_crash_", null, null);
+            System.out.println(tempFile.getAbsolutePath());
+            FileWriter fileWriter = new FileWriter(tempFile);
+            PrintWriter printWriter = new PrintWriter(fileWriter);
+            printWriter.println(content);
+            printWriter.close();
+            // 程序退出时自动删除临时文件
+            tempFile.deleteOnExit();
+        } catch (IOException exception) {
+            exception.printStackTrace();
+        }
+        return tempFile;
     }
 
     public static void main(String[] args) {
