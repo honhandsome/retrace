@@ -1,5 +1,6 @@
 import com.intellij.ide.plugins.IdeaPluginDescriptor;
 import com.intellij.ide.plugins.PluginManager;
+import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
@@ -69,6 +70,15 @@ public class RetraceDialog extends JDialog {
         textArea.setLineWrap(true);
         // textArea 换行不断字
         textArea.setWrapStyleWord(true);
+
+        if (project == null) return;
+        //获取 project 级别的 PropertiesComponent，指定相应的 project
+        PropertiesComponent propertiesComponent = PropertiesComponent.getInstance(project);
+        String mappingConfig = propertiesComponent.getValue("MappingConfig");
+        if (mappingConfig != null && mappingConfig.length() > 0) {
+            comboMappingBox.insertItemAt(mappingConfig, 0);
+            comboMappingBox.setSelectedIndex(0);
+        }
     }
 
     private void onAddMapping() {
@@ -76,11 +86,24 @@ public class RetraceDialog extends JDialog {
                 false, false, false, false, false);
         VirtualFile virtualFile = FileChooser.chooseFile(chooserDescriptor, project, null);
         if (virtualFile != null) {
-            comboMappingBox.insertItemAt(virtualFile.getPath(), 0);
+            String mappingConfig = virtualFile.getPath();
+            //获取 project 级别的 PropertiesComponent，指定相应的 project
+            PropertiesComponent propertiesComponent = PropertiesComponent.getInstance(project);
+            propertiesComponent.setValue("MappingConfig", mappingConfig);
+            comboMappingBox.insertItemAt(mappingConfig, 0);
+            comboMappingBox.setSelectedIndex(0);
         }
     }
 
     private void onOK() {
+        if (comboMappingBox.getSelectedItem() == null) {
+            Messages.showMessageDialog("Please choose Mapping first!", "ERROR", Messages.getInformationIcon());
+            return;
+        }
+        if (textArea.getText() == null || textArea.getText().length() == 0) {
+            Messages.showMessageDialog("Please add crash stack first!", "ERROR", Messages.getInformationIcon());
+            return;
+        }
         // 创建崩溃堆栈临时文件
         File crash = createTempFile(textArea.getText());
         if (crash != null) {
@@ -92,12 +115,14 @@ public class RetraceDialog extends JDialog {
                     String path = plugin.getPath().getAbsolutePath();
                     System.out.println(path);
                     // retrace
-                    String cmd = "java -cp lib/r8.jar com.android.tools.r8.retrace.Retrace " + project.getBasePath() + "/mapping.txt " + crash.getAbsolutePath();
+                    String cmd = "java -cp lib/r8.jar com.android.tools.r8.retrace.Retrace " + comboMappingBox.getSelectedItem() + " " + crash.getAbsolutePath();
                     String result = TerminalHelper.execCmd(cmd, plugin.getPath());
                     System.out.println(result);
                     textArea.setText(result);
                     textArea.setEditable(false);
                     buttonOK.setVisible(false);
+                    comboMappingBox.setVisible(false);
+                    buttonMappingConfig.setVisible(false);
                 }
             } catch (Exception e) {
                 e.printStackTrace();
